@@ -1,0 +1,140 @@
+---
+title: "Thesis Cleaning"
+output: html_document
+date: "2023-01-03"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Loading in data
+
+```{r}
+AZ <- read_xlsx("/Users/nicolekaufmann/Desktop/Thesis/AZ COVID-19 Data (FINAL deidentified) wave 1 (1).xlsx")
+AZ <- AZ[-1,]
+AZ 
+CA <- read_xlsx("/Users/nicolekaufmann/Desktop/Thesis/CA COVID-19 Data (FINAL deidentified) wave 1.xlsx")
+CA <- CA[-1,]
+CA
+```
+
+
+```{r}
+#Cleaning AZ
+library(dplyr)
+#Dropping if answer "I don't know/Prefer not to answer" to Q14 on the AZ survey (willingness to get COVID vaccine)
+AZ <- AZ %>% filter(Q14 != "5")
+#Renaming Q14= "Vax_Likelihood"
+AZ <- AZ %>% rename("Vax_Likelihood"="Q14")
+AZ
+#Cleaning CA
+#Dropping if answer "I don't know/Prefer not to answer" to Q6 on the CA survey
+#First, renaming "6" to be "Vax Likelihood"
+CA <- CA%>% rename("Vax_Likelihood"="6")
+#Now, filtering out people who responded "I don't know" to outcome variable
+CA <- CA %>% filter(Vax_Likelihood != "I don't know/prefer not to answer") %>% filter(Vax_Likelihood != "No lo sé / prefiero no responder")
+CA
+
+#Now, filtering out people who left Q49, the urban question, blank in the CA questionnaire, as proxy for people who did not finish the survey
+CA <- CA%>% rename("geo_location"="49")
+CA <- CA %>% filter(geo_location != "")
+
+#Now, filtering out people who left Q84 blank, the urban question in the AZ questionnaire, as proxy for people who did not finish the survey
+AZ <- AZ %>% filter(Q84 != "")
+str(AZ)
+
+```
+
+```{r}
+#Changing Sí to Yes for all of CA data 
+CA[CA=="Sí"] <- "Yes"
+
+#Translating "No lo sé / prefiero no responder" to "I don't know/prefer not to answer" for all of CA data
+CA[CA=="No lo sé / prefiero no responder"] <- "I don't know/prefer not to answer"
+
+```
+
+
+```{r}
+#Making a Likelihood Variable. For AZ, if Vax_Likelihood=1 or 2, then "Likely" and if Vax_Likelihood=3 or 4, then "Unlikely." Likely=1 and unlikely=0. 
+AZ <- AZ %>% mutate(Likely = ifelse(Vax_Likelihood==1, 1,
+                                    ifelse(Vax_Likelihood==2, 1,
+                                           ifelse(Vax_Likelihood==3,0,
+                                                  ifelse(Vax_Likelihood==4,0, NA)))))
+
+#Making a Likelihood Variable. For CA, if Extremely Likely or Extremadamente probable, then Likely =1. If Somewhat Likely or Algo probable, then Likely=1. If Unlikely or Poco Probable, then Likely=0. If Very Unlikely or Muy Improbable, then Likely = 0. 
+
+CA <- CA %>% mutate(Likely = ifelse(Vax_Likelihood== "Extremely likely", 1,
+                                    ifelse(Vax_Likelihood=="Extremadamente probable", 1,
+                                           ifelse(Vax_Likelihood=="Algo probable",1,
+                                                  ifelse(Vax_Likelihood=="Somewhat likely",1,
+                                                         ifelse(Vax_Likelihood=="Unlikely",0,
+                                                                ifelse(Vax_Likelihood=="Poco probable",0,
+                                                                       ifelse(Vax_Likelihood=="Very unlikely", 0,
+                                                                              ifelse(Vax_Likelihood=="Muy improbable",0, NA)))))))))
+CA
+#Checking NAs
+table(AZ$Likely, useNA = "always")
+table(CA$Likely, useNA="always")
+#No NAs exist for the "Likely" column
+
+```
+
+#For CA dataset, creating a variable for having at least one comorbid condition
+```{r}
+#First, we rename the conditions for both datasets
+CA <- CA%>% rename("Heart_Issue"="17_1") %>% rename("Lung_Issue"="17_2") %>% rename("Cancer"="17_3") %>% rename("Hypertension"="17_4") %>% rename("Diabetes"="17_5") %>% rename("Obesity"="17_6") %>% rename("Autoimmune_Disorder"="17_7") %>% rename("Other_Autoimmune"="17_8") %>% rename("Depressive_Disorder"="17_9") %>% rename("Anxiety_Disorder"="17_10") %>% rename("Dementia_Disorder"="17_11")
+str(CA)
+
+AZ <- AZ %>% rename("Heart_Issue"="Q48_1") %>% rename("Lung_Issue"="Q48_2") %>% rename("Cancer"="Q48_3") %>% rename("Hypertension"="Q48_4") %>% rename("Diabetes"="Q48_5") %>% rename("Obesity"="Q48_6") %>% rename("Autoimmune_Disorder"="Q48_7") %>% rename("Other_Autoimmune"="Q48_8") %>% rename("Depressive_Disorder"="Q48_9") %>% rename("Anxiety_Disorder"="Q48_10") %>% rename("Dementia_Disorder"="Q48_11")
+str(AZ)
+
+```
+Not all of the above conditions are comorbid conditions. Anxiety and Depressive Disorders should not be considered comorbid conditions. 
+
+```{r}
+#If "I don't know/prefer not to answer" for all of the comorbid conditions, we should drop them
+#CA <- CA %>% filter("Heart_Issue"=="I don't know/prefer not to answer" & "Lung_Issue"=="I don't know/prefer not to answer" & "Cancer"=="I don't know/prefer not to answer" & "Hypertension"=="I don't know/prefer not to answer" & "Diabetes"=="I don't know/prefer not to answer" & "Obesity"=="I don't know/prefer not to answer" & "Autoimmune_Disorder"=="I don't know/prefer not to answer" & "Other_Autoimmune"=="I don't know/prefer not to answer" & "Dementia_Disorder"=="I don't know/prefer not to answer")
+```
+
+
+```{r}
+#For CA dataset: Creating a variable for having at least one comorbid condition. Comorbid=1 means has a comorbid condition. Comorbid=0 means the person does not have a  comorbid condition. 
+CA <- CA %>% mutate(comorbidity = ifelse(Heart_Issue == "Yes" |Lung_Issue =="Yes" | Cancer == "Yes" | Hypertension == "Yes" | Diabetes == "Yes" | Obesity == "Yes" | Autoimmune_Disorder == "Yes" | Other_Autoimmune =="Yes" | Dementia_Disorder == "Yes", 1, 0))
+table(CA$comorbidity, useNA = "always")
+
+#For AZ dataset: Creating a variable for having at least one comorbid condition. Comorbid=1 means has a comorbid condition. Comorbid=0 means the person does not have a  comorbid condition. 
+AZ <- AZ %>% mutate(comorbidity = ifelse(Heart_Issue == "Yes" |Lung_Issue =="Yes" | Cancer == "Yes" | Hypertension == "Yes" | Diabetes == "Yes" | Obesity == "Yes" | Autoimmune_Disorder == "Yes" | Other_Autoimmune =="Yes" | Dementia_Disorder == "Yes", 1, 0))
+table(CA$comorbidity, useNA = "always")
+
+
+```
+
+Now, I will create variables for Anxiety and Depression in CA dataset
+```{r}
+CA <- CA %>% mutate(Diagnosed_Anxiety = ifelse(Anxiety_Disorder == "Yes", 1, 0)) %>% mutate(Diagnosed_Depression = ifelse(Depressive_Disorder=="Yes", 1, 0))
+table(CA$Diagnosed_Anxiety, useNA = "always")
+table(CA$Diagnosed_Depression)
+```
+
+Now, I will create a urban/rural variable for CA dataset
+```{r}
+#SHOULD I DROP PEOPLE WHO DON'T KNOW / PREFER NOT TO ANSWER?
+CA[CA=="Urbana / ciudad"] <- "Urban/City"
+CA[CA=="Suburbana"] <- "Suburban"
+CA[CA=="Rural"] <- "Rural/County area"
+CA[CA=="No sé / prefiero no responder"] <- "I don't know/prefer not to answer"
+
+#Creating variable
+CA <- CA %>% mutate(location = ifelse(geo_location == "Urban/City", 2,
+                                      ifelse(geo_location == "Suburban", 1,
+                                             ifelse(geo_location == "Rural/County area", 0, NA))))
+table(CA$location, useNA = "always")
+
+```
+
+
+
+
+
