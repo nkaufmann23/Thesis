@@ -59,18 +59,15 @@ AZ
 CA <- CA%>% rename("Vax_Likelihood"="6")
 #Now, filtering out people who responded "I don't know" to outcome variable
 CA <- CA %>% filter(Vax_Likelihood != "I don't know/prefer not to answer") %>% filter(Vax_Likelihood != "No lo sé / prefiero no responder")
-CA
+
 #Renaming race column
 CA <- CA %>% rename("Race_Question"="1...7")
 str(CA)
 table(CA$Race_Question)
 
-#Now, filtering out people who left Q49, the urban question, blank in the CA questionnaire, as proxy for people who did not finish the survey
+#Renaming urban/suburban location question for AZ and CA
 CA <- CA%>% rename("geo_location"="49")
-
-#Now, filtering out people who left Q84 blank, the urban question in the AZ questionnaire, as proxy for people who did not finish the survey
 AZ <- AZ%>% rename("geo_location"="Q84")
-str(AZ)
 
 ```
 
@@ -90,9 +87,9 @@ Now, I will create race variables
 table(AZ$Q7, useNA = "always")
 AZ <- AZ %>% mutate(Race_Question = ifelse(Q7=="1", "Hispanic/Latino", "Multi-Ethnic"))
 table(AZ$Race_Question)
-#Only 21 identify as multi-ethnic, so will filter them out
-AZ <- AZ %>% filter(Race_Question =="Hispanic/Latino")
-table(AZ$Race_Question)
+#Only 21 identify as multi-ethnic. NOT FILTERING THEM OUT JUST YET
+#AZ <- AZ %>% filter(Race_Question =="Hispanic/Latino")
+#table(AZ$Race_Question)
 
 #FOR CA, I renamed it "Race_Question." It is a single multiple choice question: "What race/ethnicity do you most identify with?"
 table(CA$Race_Question)
@@ -171,11 +168,18 @@ Not all of the above conditions are comorbid conditions. Anxiety and Depressive 
 
 Now, dropping people who do not have any comorbid conditions
 ```{r}
-#If "I don't know/prefer not to answer" for all of the comorbid conditions, we should drop them
-#CA <- CA %>% mutate(ifelse(No_comorbid == ("Heart_Issue"=="I don't know/prefer not to answer" & "Lung_Issue"=="I don't know/prefer not to answer" & "Cancer"=="I don't know/prefer not to answer" & "Hypertension"=="I don't know/prefer not to answer" & "Diabetes"!="I don't know/prefer not to answer" & "Obesity"=="I don't know/prefer not to answer" & "Autoimmune_Disorder"=="I don't know/prefer not to answer" & "Other_Autoimmune"=="I don't know/prefer not to answer" & "Dementia_Disorder"=="I don't know/prefer not to answer",1,0)))
+#If "I don't know/prefer not to answer" for all of the comorbid conditions, we should drop them. Creating variable if "I don't know/prefer not to answer" for all conditions
 
-AZ <- AZ %>% filter("Heart_Issue"=="I don't know/prefer not to answer" & "Lung_Issue"=="I don't know/prefer not to answer" & "Cancer"=="I don't know/prefer not to answer" & "Hypertension"=="I don't know/prefer not to answer" & "Diabetes"=="I don't know/prefer not to answer" & "Obesity"=="I don't know/prefer not to answer" & "Autoimmune_Disorder"=="I don't know/prefer not to answer" & "Other_Autoimmune"=="I don't know/prefer not to answer" & "Dementia_Disorder"=="I don't know/prefer not to answer")
+#Cleaning CA
+CA$no_comorbid = (CA$Heart_Issue == "I don't know/prefer not to answer") + (CA$Lung_Issue == "I don't know/prefer not to answer") + (CA$Cancer == "I don't know/prefer not to answer") + (CA$Hypertension == "I don't know/prefer not to answer") + (CA$Diabetes == "I don't know/prefer not to answer") + (CA$Obesity == "I don't know/prefer not to answer") + (CA$Autoimmune_Disorder == "I don't know/prefer not to answer") + (CA$Other_Autoimmune == "I don't know/prefer not to answer") + (CA$Dementia_Disorder == "I don't know/prefer not to answer")
+table(CA$no_comorbid)
+#no one to kick out for CA
+  
+#Cleaning AZ
+AZ$no_comorbid = (AZ$Heart_Issue ==3) + (AZ$Lung_Issue==3)+ (AZ$Cancer==3) + (AZ$Hypertension==3) + (AZ$Diabetes ==3) + (AZ$Obesity ==3) + (AZ$Autoimmune_Disorder==3) + (AZ$Other_Autoimmune==3) + (AZ$Dementia_Disorder==3) 
 
+table(AZ$no_comorbid) #2 people answered "I don't know" to all - will filter them out. There were 4 when I looked in raw data, and 2 had not answered the urban question, so makes sense!
+AZ <- AZ %>% filter(no_comorbid !=9)
 ```
 
 
@@ -190,8 +194,6 @@ CA <- CA %>% mutate(comorbidity = ifelse(Heart_Issue == "Yes", 1,
                                 ifelse(Autoimmune_Disorder == "Yes",1,
                              ifelse(Other_Autoimmune =="Yes",1, ifelse(Dementia_Disorder == "Yes",1, 0))))))))))
 table(CA$comorbidity, useNA = "always")
-#THERE IS ONE NA VALUE DUE TO THERE BEING A BLANK VALUE FOR OBESITY - WHAT DO I DO TO OVERRIDE THE NA?
-
 
 #For AZ dataset: Creating a variable for having at least one comorbid condition. Comorbid=1 means has a comorbid condition. Comorbid=0 means the person does not have a  comorbid condition. 
 AZ <- AZ %>% mutate(comorbidity = ifelse(Heart_Issue == "1", 1,
@@ -203,19 +205,6 @@ AZ <- AZ %>% mutate(comorbidity = ifelse(Heart_Issue == "1", 1,
                                 ifelse(Autoimmune_Disorder == "1",1,
                              ifelse(Other_Autoimmune =="1",1, ifelse(Dementia_Disorder == "1",1, 0))))))))))
 table(AZ$comorbidity, useNA = "always")
-```
-
-Now, I will create variables for Anxiety and Depression in datasets
-```{r}
-CA <- CA %>% mutate(Diagnosed_Anxiety = ifelse(Anxiety_Disorder == "Yes", 1, 0)) %>% mutate(Diagnosed_Depression = ifelse(Depressive_Disorder=="Yes", 1, 0))
-table(CA$Diagnosed_Anxiety, useNA = "always")
-table(CA$Diagnosed_Depression, useNA="always")
-
-
-AZ <- AZ %>% mutate(Diagnosed_Anxiety = ifelse(Anxiety_Disorder == "1", 1, 0)) %>% mutate(Diagnosed_Depression = ifelse(Depressive_Disorder=="1", 1, 0))
-table(AZ$Diagnosed_Anxiety, useNA = "always")
-table(AZ$Diagnosed_Depression, useNA="always")
-
 ```
 
 Now, creating variables for educational level
