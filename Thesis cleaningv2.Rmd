@@ -1,0 +1,441 @@
+---
+title: "Thesis Cleaning"
+output: html_document
+date: "2023-01-03"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)    
+library(tidyr)
+library(broom)
+library(dslabs)
+ds_theme_set()
+library(ggplot2)
+library(readr)
+library(knitr)
+library(gridExtra)
+library(dplyr)
+library(table1)
+library(splitstackshape)
+library(caret)
+library(e1071)
+library(pROC)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(MASS)
+library(kableExtra)
+library(scales)
+library(readxl)
+```
+
+## Loading in data
+
+```{r}
+AZ <- read_xlsx("/Users/nicolekaufmann/Desktop/Thesis/AZ COVID-19 Data (FINAL deidentified) wave 1 (1).xlsx")
+AZ <- AZ[-1,]
+AZ 
+CA <- read_xlsx("/Users/nicolekaufmann/Desktop/Thesis/CA COVID-19 Data (FINAL deidentified) wave 1.xlsx")
+CA <- CA[-1,]
+CA
+str(AZ)
+table(AZ$Q7)
+
+```
+
+
+```{r}
+#Cleaning AZ
+library(dplyr)
+#Dropping if answer "I don't know/Prefer not to answer" to Q14 on the AZ survey (willingness to get COVID vaccine)
+AZ <- AZ %>% filter(Q14 != "5")
+#Renaming Q14= "Vax_Likelihood"
+AZ <- AZ %>% rename("Vax_Likelihood"="Q14")
+AZ
+#Cleaning CA
+#Dropping if answer "I don't know/Prefer not to answer" to Q6 on the CA survey
+#First, renaming "6" to be "Vax Likelihood"
+CA <- CA%>% rename("Vax_Likelihood"="6")
+#Now, filtering out people who responded "I don't know" to outcome variable
+CA <- CA %>% filter(Vax_Likelihood != "I don't know/prefer not to answer") %>% filter(Vax_Likelihood != "No lo sé / prefiero no responder")
+CA
+#Renaming race column
+CA <- CA %>% rename("Race_Question"="1...7")
+str(CA)
+table(CA$Race_Question)
+
+#Now, filtering out people who left Q49, the urban question, blank in the CA questionnaire, as proxy for people who did not finish the survey
+CA <- CA%>% rename("geo_location"="49")
+
+#Now, filtering out people who left Q84 blank, the urban question in the AZ questionnaire, as proxy for people who did not finish the survey
+AZ <- AZ%>% rename("geo_location"="Q84")
+str(AZ)
+
+```
+
+```{r}
+#Changing Sí to Yes for all of CA data 
+CA[CA=="Sí"] <- "Yes"
+
+#Translating "No lo sé / prefiero no responder" to "I don't know/prefer not to answer" for all of CA data
+CA[CA=="No lo sé / prefiero no responder"] <- "I don't know/prefer not to answer"
+
+```
+
+
+Now, I will create race variables
+```{r}
+#For AZ, race variable is Q7: "What race/ethnicity do you most identify with? Select all that apply." We will create two categories: 1) Hispanic/Latino and 2) multi-ethnic (1 is Hispanic/Latino, 1+ anything else is multi-ethnic)
+table(AZ$Q7, useNA = "always")
+AZ <- AZ %>% mutate(Race_Question = ifelse(Q7=="1", "Hispanic/Latino", "Multi-Ethnic"))
+table(AZ$Race_Question)
+#Only 21 identify as multi-ethnic, so will filter them out
+AZ <- AZ %>% filter(Race_Question =="Hispanic/Latino")
+table(AZ$Race_Question)
+
+#FOR CA, I renamed it "Race_Question." It is a single multiple choice question: "What race/ethnicity do you most identify with?"
+table(CA$Race_Question)
+#First, renaming Spanish answers to English
+CA[CA=="Hispano/latino (incluyendo herencia indígena)"] <- "Hispanic/Latino (including of Indigenous heritage)"
+table(CA$Race_Question)
+#For CA, now dropping all the people who do not identify as Hispanic/Latino
+CA <- CA %>% filter(Race_Question == "Hispanic/Latino (including of Indigenous heritage)")
+table(CA$Race_Question)
+#Now, we only have people who identify as Hispanic/Latino
+
+```
+
+Now, I will create a urban/rural variable for the datasets
+```{r}
+#Dropping people who do not know/prefer not to answer (answered 4 to Q49)
+CA[CA=="Urbana / ciudad"] <- "Urban/City"
+CA[CA=="Suburbana"] <- "Suburban"
+CA[CA=="Rural"] <- "Rural/County area"
+CA[CA=="No sé / prefiero no responder"] <- "I don't know/prefer not to answer"
+
+#Creating variable for CA dataset
+CA <- CA %>% mutate(location = ifelse(geo_location == "Urban/City", 2,
+                                      ifelse(geo_location == "Suburban", 1,
+                                             ifelse(geo_location == "Rural/County area", 0, NA))))
+table(CA$location, useNA = "always") #The NAs represent "I don't knows" or blanks
+CA <- CA %>% filter(location != "NA")
+table(CA$location, useNA = "always")
+
+#Creating variable for AZ dataset
+AZ <- AZ %>% mutate(location=ifelse(geo_location=="3",2,
+                                    ifelse(geo_location=="2",1,
+                                           ifelse(geo_location=="1",0, NA))))
+table(AZ$location,useNA="always")
+AZ <- AZ %>% filter(location != "NA")
+table(AZ$location, useNA="always")
+```
+
+```{r}
+#Making a Likelihood Variable. For AZ, if Vax_Likelihood=1 or 2, then "Likely" and if Vax_Likelihood=3 or 4, then "Unlikely." Likely=1 and unlikely=0. 
+AZ <- AZ %>% mutate(Likely = ifelse(Vax_Likelihood==1, 1,
+                                    ifelse(Vax_Likelihood==2, 1,
+                                           ifelse(Vax_Likelihood==3,0,
+                                                  ifelse(Vax_Likelihood==4,0, NA)))))
+
+table(AZ$Likely, useNA = "always")
+
+#Making a Likelihood Variable. For CA, if Extremely Likely or Extremadamente probable, then Likely =1. If Somewhat Likely or Algo probable, then Likely=1. If Unlikely or Poco Probable, then Likely=0. If Very Unlikely or Muy Improbable, then Likely = 0. 
+
+CA <- CA %>% mutate(Likely = ifelse(Vax_Likelihood== "Extremely likely", 1,
+                                    ifelse(Vax_Likelihood=="Extremadamente probable", 1,
+                                           ifelse(Vax_Likelihood=="Algo probable",1,
+                                                  ifelse(Vax_Likelihood=="Somewhat likely",1,
+                                                         ifelse(Vax_Likelihood=="Unlikely",0,
+                                                                ifelse(Vax_Likelihood=="Poco probable",0,
+                                                                       ifelse(Vax_Likelihood=="Very unlikely", 0,
+                                                                              ifelse(Vax_Likelihood=="Muy improbable",0, NA)))))))))
+
+#Checking NAs
+table(AZ$Likely, useNA = "always")
+table(CA$Likely, useNA="always")
+#No NAs exist for the "Likely" column
+
+```
+
+#For CA dataset, creating a variable for having at least one comorbid condition
+```{r}
+#First, we rename the conditions for both datasets
+CA <- CA%>% rename("Heart_Issue"="17_1") %>% rename("Lung_Issue"="17_2") %>% rename("Cancer"="17_3") %>% rename("Hypertension"="17_4") %>% rename("Diabetes"="17_5") %>% rename("Obesity"="17_6") %>% rename("Autoimmune_Disorder"="17_7") %>% rename("Other_Autoimmune"="17_8") %>% rename("Depressive_Disorder"="17_9") %>% rename("Anxiety_Disorder"="17_10") %>% rename("Dementia_Disorder"="17_11")
+
+
+AZ <- AZ %>% rename("Heart_Issue"="Q48_1") %>% rename("Lung_Issue"="Q48_2") %>% rename("Cancer"="Q48_3") %>% rename("Hypertension"="Q48_4") %>% rename("Diabetes"="Q48_5") %>% rename("Obesity"="Q48_6") %>% rename("Autoimmune_Disorder"="Q48_7") %>% rename("Other_Autoimmune"="Q48_8") %>% rename("Depressive_Disorder"="Q48_9") %>% rename("Anxiety_Disorder"="Q48_10") %>% rename("Dementia_Disorder"="Q48_11")
+
+```
+Not all of the above conditions are comorbid conditions. Anxiety and Depressive Disorders should not be considered comorbid conditions. 
+
+Now, dropping people who do not have any comorbid conditions
+```{r}
+#If "I don't know/prefer not to answer" for all of the comorbid conditions, we should drop them
+#CA <- CA %>% mutate(ifelse(No_comorbid == ("Heart_Issue"=="I don't know/prefer not to answer" & "Lung_Issue"=="I don't know/prefer not to answer" & "Cancer"=="I don't know/prefer not to answer" & "Hypertension"=="I don't know/prefer not to answer" & "Diabetes"!="I don't know/prefer not to answer" & "Obesity"=="I don't know/prefer not to answer" & "Autoimmune_Disorder"=="I don't know/prefer not to answer" & "Other_Autoimmune"=="I don't know/prefer not to answer" & "Dementia_Disorder"=="I don't know/prefer not to answer",1,0)))
+
+AZ <- AZ %>% filter("Heart_Issue"=="I don't know/prefer not to answer" & "Lung_Issue"=="I don't know/prefer not to answer" & "Cancer"=="I don't know/prefer not to answer" & "Hypertension"=="I don't know/prefer not to answer" & "Diabetes"=="I don't know/prefer not to answer" & "Obesity"=="I don't know/prefer not to answer" & "Autoimmune_Disorder"=="I don't know/prefer not to answer" & "Other_Autoimmune"=="I don't know/prefer not to answer" & "Dementia_Disorder"=="I don't know/prefer not to answer")
+
+```
+
+
+```{r}
+#For CA dataset: Creating a variable for having at least one comorbid condition. Comorbid=1 means has a comorbid condition. Comorbid=0 means the person does not have a  comorbid condition. 
+CA <- CA %>% mutate(comorbidity = ifelse(Heart_Issue == "Yes", 1,
+                                         ifelse(Lung_Issue =="Yes", 1,
+                                          ifelse(Cancer == "Yes",1,
+                                          ifelse(Hypertension == "Yes",1,
+                                           ifelse(Diabetes == "Yes",1,
+                                           ifelse(Obesity == "Yes",1,
+                                ifelse(Autoimmune_Disorder == "Yes",1,
+                             ifelse(Other_Autoimmune =="Yes",1, ifelse(Dementia_Disorder == "Yes",1, 0))))))))))
+table(CA$comorbidity, useNA = "always")
+#THERE IS ONE NA VALUE DUE TO THERE BEING A BLANK VALUE FOR OBESITY - WHAT DO I DO TO OVERRIDE THE NA?
+
+
+#For AZ dataset: Creating a variable for having at least one comorbid condition. Comorbid=1 means has a comorbid condition. Comorbid=0 means the person does not have a  comorbid condition. 
+AZ <- AZ %>% mutate(comorbidity = ifelse(Heart_Issue == "1", 1,
+                                         ifelse(Lung_Issue =="1", 1,
+                                          ifelse(Cancer == "1",1,
+                                          ifelse(Hypertension == "1",1,
+                                    ifelse(Diabetes == "1",1,
+                                  ifelse(Obesity == "1",1,
+                                ifelse(Autoimmune_Disorder == "1",1,
+                             ifelse(Other_Autoimmune =="1",1, ifelse(Dementia_Disorder == "1",1, 0))))))))))
+table(AZ$comorbidity, useNA = "always")
+```
+
+Now, I will create variables for Anxiety and Depression in datasets
+```{r}
+CA <- CA %>% mutate(Diagnosed_Anxiety = ifelse(Anxiety_Disorder == "Yes", 1, 0)) %>% mutate(Diagnosed_Depression = ifelse(Depressive_Disorder=="Yes", 1, 0))
+table(CA$Diagnosed_Anxiety, useNA = "always")
+table(CA$Diagnosed_Depression, useNA="always")
+
+
+AZ <- AZ %>% mutate(Diagnosed_Anxiety = ifelse(Anxiety_Disorder == "1", 1, 0)) %>% mutate(Diagnosed_Depression = ifelse(Depressive_Disorder=="1", 1, 0))
+table(AZ$Diagnosed_Anxiety, useNA = "always")
+table(AZ$Diagnosed_Depression, useNA="always")
+
+```
+
+Now, creating variables for educational level
+```{r}
+
+#For AZ, Q82 is "what is your highest level of completed education"
+#Grouping together all people who have never been to school, less than primary/elementary, and less than secondary/high school as "high school or less." There are only ~6 people who have never been to school/have less than elementary - too small of a stratum.
+
+#Less than or equal to high school=0, college degree=1, graduate degree=2, "I don't know" is set to NA
+AZ <- AZ %>% mutate(education=ifelse(Q82=="1", 0,
+                               ifelse(Q82=="2",0,
+                               ifelse(Q82=="3",0,
+                              ifelse(Q82=="4",1,
+                              ifelse(Q82=="5",2, NA))))))
+table(AZ$education, useNA="always")
+#Dropping people who responded "6," which was "I don't know/prefer not to answer"
+AZ <- AZ %>% filter(education !="6")
+table(AZ$education, useNA="always")
+
+#For CA survey, education question is Q40
+table(CA$"40")
+
+CA <- CA %>% rename("ed_level"="40") 
+table(CA$ed_level, useNA = "always")
+CA <-CA %>% mutate(education= ifelse(ed_level=="Escuela primaria o menos",0,
+                              ifelse(ed_level=="Primary/elementary school or less",0,
+                                ifelse(ed_level=="Escuela secundaria",0,
+                              ifelse(ed_level=="Secondary/high school",0,
+                                     ifelse(ed_level=="Título del colegio comunitario o universitario",1,
+                                  ifelse(ed_level=="College or University degree",1,
+                              ifelse(ed_level=="Graduate/Postgraduate degree",2,
+                                     ifelse(ed_level=="Título graduado o posgrado",2, NA)))))))))
+table(CA$education, useNA="always")
+#Dropping people who did not respond or who responded "I don't know/prefer not to answer"
+CA <- CA %>% filter(education != "NA")
+table(CA$education, useNA = "always")
+
+```
+
+Now, I will create a variable for gender for CA
+```{r}
+#For CA, asked only "how would you describe your sex" - male, female, other, prefer not to answer in Q36.
+#mujer = female, hombre=man
+
+CA[CA=="Mujer"] <- "Female"
+CA[CA=="Hombre"] <- "Male"
+
+#if gender=1, male. if gender=0, female. 
+CA <- CA %>% rename(self_sex = "36") %>% mutate(gender = ifelse(self_sex=="Male", 1,
+                                                      ifelse(self_sex=="Female",0, NA)))
+
+table(CA$self_sex)
+table(CA$gender, useNA = "always")
+#Filtering out people who did not answer
+
+CA <- CA %>% filter(gender != "NA")
+table(CA$gender, useNA = "always")
+```
+
+Now, I will create gender variable for AZ
+```{r}
+#For AZ, Q76 is "how would you describe yourself?"
+table(AZ$"Q76", useNA="always")
+AZ <- AZ %>% rename(self_sex="Q76") %>% mutate(gender= ifelse(self_sex=="1",1,
+                                                           ifelse(self_sex=="2",0, NA)))
+
+table(AZ$self_sex, useNA = "always")
+table(AZ$gender, useNA="always")
+#filtering out people who identify as neither male nor female
+AZ <- AZ %>% filter(gender != "NA")
+table(AZ$gender)
+
+```
+
+Now, I will make variables for PHQ4 scores for Arizona
+```{r}
+#For AZ, Q52 is the PHQ4 question. I am creating a variable that is =1 if the participant answered "5" or "I prefer not to answer" to at least one of the questions. This is because the PHQ4 question relies on data from every column - cannot accurately detect anxiety/depression otherwise. 
+
+#If PHQ_empty=1, then do not use
+AZ <- AZ %>% mutate(PHQ_empty = ifelse(Q52_1=="5", 1,
+                                 ifelse(Q52_2=="5", 1,
+                                 ifelse(Q52_3=="5",1,
+                               ifelse(Q52_4=="5",1,0)))))
+
+table(AZ$PHQ_empty)
+#Filtering out people for whom there is no PHQ4 score (PHQ empty =1)
+AZ <- AZ %>% filter(PHQ_empty == "0")
+table(AZ$PHQ_empty, useNA="always")
+
+#Creating depression score. This means Q52_1 + Q52_2 >=3 is depressed
+AZ$Q52_1 <- as.numeric(AZ$Q52_1)
+AZ$Q52_2 <- as.numeric(AZ$Q52_2)
+AZ$Q52_3 <- as.numeric(AZ$Q52_3)
+AZ$Q52_4 <- as.numeric(AZ$Q52_4)
+
+#If depressed=1, if not=0
+#filter out invalid PHQ
+AZ <- AZ %>% filter(PHQ_empty != "1")
+#First have to change the scale of the questions
+AZ <- AZ %>% mutate(little_interest = ifelse(Q52_1=="1", 3,
+                                          ifelse(Q52_1=="2", 2,
+                                        ifelse(Q52_1=="3",1, 0))))
+
+AZ <- AZ %>% mutate(feeling_down = ifelse(Q52_2=="1", 3,
+                                          ifelse(Q52_2=="2", 2,
+                                        ifelse(Q52_2=="3",1, 0))))
+                                              
+AZ <- AZ %>% mutate(sum_dep = (little_interest + feeling_down)) %>% mutate(PHQ_dep = ifelse(sum_dep >= 3, 1,0))
+table(AZ$sum_dep)
+#If depressed, PHQ_dep=1
+table(AZ$PHQ_dep)
+
+#Now, will repeat for anxiety
+AZ <- AZ %>% mutate(nervous = ifelse(Q52_3=="1", 3,
+                                          ifelse(Q52_3=="2", 2,
+                                        ifelse(Q52_3=="3",1, 0))))
+
+AZ <- AZ %>% mutate(worrying = ifelse(Q52_4=="1", 3,
+                                          ifelse(Q52_4=="2", 2,
+                                        ifelse(Q52_4=="3",1, 0))))
+
+AZ <- AZ %>% mutate(sum_anx = (nervous + worrying)) %>% mutate(PHQ_anx = ifelse(sum_anx >=3, 1,0))
+table(AZ$PHQ_anx)
+
+```
+
+Now, I will make PHQ4 scores for CA. There is no option for "I don't know/prefer not to answer" for CA.
+```{r}
+#Double-Check translations
+CA <- CA %>% rename("PH_int"="19_1") %>% mutate(little_interest = ifelse(PH_int=="Nearly every day", 3,
+                                      ifelse(PH_int=="Casi a diario", 3,       
+                                             ifelse(PH_int=="More than half the days",2,
+                                                    ifelse(PH_int=="La mayoría de los días",2,
+                                             ifelse(PH_int == "Several days", 1,
+                                                   ifelse(PH_int == "Varios días", 1, 
+                                              ifelse(PH_int=="Not at all",0,
+                                                     ifelse(PH_int=="Ningún día",0,NA)))))))))
+table(CA$little_interest)
+CA <- CA %>% rename("PH_feel"="19_2") %>% mutate(feeling_down = ifelse(PH_feel=="Nearly every day", 3,
+                                      ifelse(PH_feel=="Casi a diario", 3,       
+                                             ifelse(PH_feel=="More than half the days",2,
+                                                    ifelse(PH_feel=="La mayoría de los días",2,
+                                             ifelse(PH_feel == "Several days", 1,
+                                                   ifelse(PH_feel == "Varios días", 1, 
+                                              ifelse(PH_feel=="Not at all",0,
+                                                     ifelse(PH_feel=="Ningún día",0,NA)))))))))
+table(CA$feeling_down)
+
+#Making depression variable
+CA <- CA%>% mutate(sum_dep = feeling_down + little_interest) %>% mutate(PHQ_dep= ifelse(sum_dep >=3, 1, 0))
+table(CA$PHQ_dep)
+
+CA <- CA %>% rename("PH_nervous"="19_3") %>% mutate(nervous = ifelse(PH_nervous=="Nearly every day", 3,
+                                      ifelse(PH_nervous=="Casi a diario", 3,       
+                                             ifelse(PH_nervous=="More than half the days",2,
+                                                    ifelse(PH_nervous=="La mayoría de los días",2,
+                                             ifelse(PH_nervous == "Several days", 1,
+                                                   ifelse(PH_nervous == "Varios días", 1, 
+                                              ifelse(PH_nervous=="Not at all",0,
+                                                     ifelse(PH_nervous=="Ningún día",0,NA)))))))))
+table(CA$nervous)
+
+CA <- CA %>% rename("PH_worrying"="19_4") %>% mutate(worrying = ifelse(PH_worrying=="Nearly every day", 3,
+                                      ifelse(PH_worrying=="Casi a diario", 3,       
+                                             ifelse(PH_worrying=="More than half the days",2,
+                                                    ifelse(PH_worrying=="La mayoría de los días",2,
+                                             ifelse(PH_worrying == "Several days", 1,
+                                                   ifelse(PH_worrying == "Varios días", 1, 
+                                              ifelse(PH_worrying=="Not at all",0,
+                                                     ifelse(PH_worrying=="Ningún día",0,NA)))))))))
+table(CA$worrying)
+
+#Making anxiety variable
+CA <- CA %>% mutate(sum_anx= nervous + worrying) %>% mutate(PHQ_anx = ifelse(sum_anx >=3, 1,0))
+
+```
+
+Checking age data for CA
+```{r}
+#Question 37 on CA questionnaire
+CA[CA=="32 anos"] <- "32"
+table(CA$"37", useNA="always")
+#Renaming column
+CA <- CA %>% rename(Age="37")
+class("Age")
+
+#It is a character, so changing it to numeric
+CA <- CA %>% mutate(Age= as.numeric(Age))
+table(CA$Age, useNA="always")
+
+#checking age distribution for CA
+age_dist <-  ggplot(CA, aes(x=Age))+
+  geom_histogram(binwidth=1, color="blue", fill="white")+
+  xlab("Age")+
+  ylab("Count")+
+  ggtitle("Age Distribution in CA")
+
+age_dist
+
+#Now checking for AZ
+table(AZ$"Q79")
+str(AZ)
+view(AZ)
+#Q79 in AZ questionnaire
+AZ <- AZ %>% rename("Age"="Q79")
+table(AZ$Age, useNA = "always")
+#Filtering out NA, changing class
+AZ <- AZ %>% filter(Age !="NA")
+class(AZ$Age)
+#Also a character variable, so changing to numeric
+AZ <- AZ %>% mutate(Age= as.numeric(Age))
+class(AZ$Age)
+
+#checking age distribution for AZ
+age_dist1 <-  ggplot(AZ, aes(x=Age))+
+  geom_histogram(binwidth=1, color="blue", fill="white")+
+  xlab("Age")+
+  ylab("Count")+
+  ggtitle("Age Distribution in AZ")
+
+age_dist1
+```
+
