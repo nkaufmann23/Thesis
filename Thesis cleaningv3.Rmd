@@ -86,9 +86,6 @@ Now, I will create race variables
 table(AZ$Q7, useNA = "always")
 AZ <- AZ %>% mutate(Race_Question = ifelse(Q7=="1", "Hispanic/Latino", "Multi-Ethnic"))
 table(AZ$Race_Question)
-#Only 21 identify as multi-ethnic. NOT FILTERING THEM OUT JUST YET
-#AZ <- AZ %>% filter(Race_Question =="Hispanic/Latino")
-#table(AZ$Race_Question)
 
 #FOR CA, I renamed it "Race_Question." It is a single multiple choice question: "What race/ethnicity do you most identify with?"
 table(CA$Race_Question)
@@ -99,6 +96,7 @@ table(CA$Race_Question)
 CA <- CA %>% filter(Race_Question == "Hispanic/Latino (including of Indigenous heritage)")
 table(CA$Race_Question)
 #Now, we only have people who identify as Hispanic/Latino and Multi-Ethnic
+
 
 ```
 
@@ -115,7 +113,7 @@ CA <- CA %>% mutate(location = ifelse(geo_location == "Urban/City", 2,
                                       ifelse(geo_location == "Suburban", 1,
                                              ifelse(geo_location == "Rural/County area", 0, NA))))
 table(CA$location, useNA = "always") #The NAs represent "I don't knows" or blanks
-CA <- CA %>% filter(location != "NA")
+#CA <- CA %>% filter(location != "NA")
 table(CA$location, useNA = "always")
 
 #Creating variable for AZ dataset
@@ -123,7 +121,7 @@ AZ <- AZ %>% mutate(location=ifelse(geo_location=="3",2,
                                     ifelse(geo_location=="2",1,
                                            ifelse(geo_location=="1",0, NA))))
 table(AZ$location,useNA="always")
-AZ <- AZ %>% filter(location != "NA")
+#AZ <- AZ %>% filter(location != "NA")
 table(AZ$location, useNA="always")
 ```
 
@@ -220,7 +218,7 @@ AZ <- AZ %>% mutate(education=ifelse(Q82=="1", 0,
                               ifelse(Q82=="5",2, NA))))))
 table(AZ$education, useNA="always")
 #Dropping people who responded "6," which was "I don't know/prefer not to answer"
-AZ <- AZ %>% filter(education !="6")
+#AZ <- AZ %>% filter(education !="6")
 table(AZ$education, useNA="always")
 
 #For CA survey, education question is Q40
@@ -238,7 +236,7 @@ CA <-CA %>% mutate(education= ifelse(ed_level=="Escuela primaria o menos",0,
                                      ifelse(ed_level=="Título graduado o posgrado",2, NA)))))))))
 table(CA$education, useNA="always")
 #Dropping people who did not respond or who responded "I don't know/prefer not to answer"
-CA <- CA %>% filter(education != "NA")
+#CA <- CA %>% filter(education != "NA")
 table(CA$education, useNA = "always")
 
 ```
@@ -259,7 +257,7 @@ table(CA$self_sex)
 table(CA$gender, useNA = "always")
 #Filtering out people who did not answer
 
-CA <- CA %>% filter(gender != "NA")
+#CA <- CA %>% filter(gender != "NA")
 table(CA$gender, useNA = "always")
 ```
 
@@ -273,7 +271,7 @@ AZ <- AZ %>% rename(self_sex="Q76") %>% mutate(gender= ifelse(self_sex=="1",1,
 table(AZ$self_sex, useNA = "always")
 table(AZ$gender, useNA="always")
 #filtering out people who identify as neither male nor female
-AZ <- AZ %>% filter(gender != "NA")
+#AZ <- AZ %>% filter(gender != "NA")
 table(AZ$gender)
 
 ```
@@ -406,12 +404,11 @@ age_dist
 #Now checking for AZ
 table(AZ$"Q79")
 str(AZ)
-view(AZ)
 #Q79 in AZ questionnaire
 AZ <- AZ %>% rename("Age"="Q79")
 table(AZ$Age, useNA = "always")
 #Filtering out NA, changing class
-AZ <- AZ %>% filter(Age !="NA")
+#AZ <- AZ %>% filter(Age !="NA")
 class(AZ$Age)
 #Also a character variable, so changing to numeric
 AZ <- AZ %>% mutate(Age= as.numeric(Age))
@@ -428,16 +425,78 @@ age_dist1
 ```
 
 ```{r}
-#Create new data set
-AZ_new <- AZ %>% select(Vax_Likelihood, Likely, location, Race_Question, comorbidity, education, gender, PHQ_dep,PHQ_anx, Age)
-CA_new <- CA %>% select(Vax_Likelihood, Likely, location, Race_Question, comorbidity, education, gender, PHQ_dep,PHQ_anx, Age)
+#Create new data set by merging. #NOT INCLUDING RACE
+AZ_new <- AZ %>% select(Likely, location, comorbidity, education, gender, PHQ_dep,PHQ_anx, Age)
+CA_new <- CA %>% select(Likely, location, comorbidity, education, gender, PHQ_dep,PHQ_anx, Age)
 
 combined_data <- full_join(AZ_new, CA_new)
-view(combined_data)
+str(combined_data)
+
+combined_data_new <- combined_data[complete.cases(combined_data),]
+combined_data_new
+str(combined_data_new)
+
+age_dist_combined <-  ggplot(combined_data_new, aes(x=Age))+
+  geom_histogram(binwidth=1, color="blue", fill="white")+
+  xlab("Age")+
+  ylab("Count")+
+  ggtitle("Age Distribution")
+
+age_dist_combined
 
 ```
 
 
+```{r}
+#Creating first model
+
+#Impact of comorbidity on likelihood - INCLUDE PHQ4 OR NO? --> NO
+logit_crude <- glm(Likely ~ comorbidity, data=combined_data_new, family=binomial(link="logit"))
+summary(logit_crude)
+exp(cbind(coef(logit_crude), confint(logit_crude)))  
+
+logit_1 <- glm(Likely ~ comorbidity + location + education + gender + Age, data=combined_data_new, family=binomial(link = "logit"))
+summary(logit_1)
+exp(cbind(coef(logit_1), confint(logit_1)))  
+
+#IMPACT OF ANXIETY ON WILLINGNESS TO GET VAXXED 
+#DO I INCLUDE PHQ_DEP AND COMORBIDITY?
+logit_2 <- glm(Likely ~ PHQ_anx + location + education + gender + Age, data=combined_data_new, family=binomial(link="logit"))
+summary(logit_2)
+exp(cbind(coef(logit_2), confint(logit_2)))  
+
+
+#IMPACT OF DEPRESSION ON WILLINGNESS TO GET VAXXED 
+#DO I INCLUDE PHQ_ANX AND COMORBIDITY?
+logit_3 <- glm(Likely ~ PHQ_dep + location + education + gender + Age, data=combined_data_new, family=binomial(link="logit"))
+summary(logit_3)
+exp(cbind(coef(logit_3), confint(logit_3))) 
+
+
+#SHOULD I FIRST SEE IF COVARIATES ARE ASSOCIATED WITH EXPOSURE / OUTCOME AND MEET DEF OF CONFOUNDER?
+#Will need to redo associations with age considering not normal distribution
+install.packages("tableone")
+library(tableone)
+#age, location associated with depression
+contvars <- c("Age")
+catvars <- c("gender","location","education")
+tab1 <- CreateTableOne(vars=c(contvars, catvars), strata="PHQ_dep", data=combined_data_new, factorVars = catvars)
+tab1
+
+#do they even need to be stat sig associated? I don't think needs to be stat sig, just associated?
+#Age associated with anxiety
+tab2<- CreateTableOne(vars=c(contvars, catvars), strata="PHQ_anx", data=combined_data_new, factorVars = catvars)
+tab2
+
+#age, location associated with comorbidity
+tab3 <- CreateTableOne(vars=c(contvars, catvars), strata="comorbidity", data=combined_data_new, factorVars = catvars)
+tab3
+
+#Now, seeing association with outcome. Age/location are associated with outcome
+tab4<- CreateTableOne(vars=c(contvars, catvars), strata="Likely", data=combined_data_new, factorVars = catvars)
+tab4
+
+```
 
 
 
